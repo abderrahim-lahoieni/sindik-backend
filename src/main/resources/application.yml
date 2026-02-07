@@ -1,0 +1,24 @@
+
+spring:
+  application:
+    name: sindik-backend
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/sindik
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+security:
+  jwt:
+    secret: "CECI_EST_UN_TRES_LONG_SECRET_POUR_JWT_256_BITS_MINIMUM"
+    expiration: 86400000   # 24h
+    clock-skew-seconds: 60
