@@ -19,6 +19,6 @@ spring:
 
 security:
   jwt:
-    secret: "CECI_EST_UN_TRES_LONG_SECRET_POUR_JWT_256_BITS_MINIMUM"
+    secret: "AjcCUcbCcVUl0c0STIzvR47Bj+x0Kch5HELXBFdTsSgY/piOMbKAaX9VFVP7FTUyInheVjV55fwvgTcN0IGb9A=="
     expiration: 86400000   # 24h
     clock-skew-seconds: 60
