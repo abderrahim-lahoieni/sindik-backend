@@ -41,7 +41,8 @@ public class AuthService  {
                 .fullName(req.getFullName())
                 .email(req.getEmail())
                 .password(passwordEncoder.encode(req.getPassword()))
-                .role(req.getRole())
+                // Public registration must never grant administrative or staff roles.
+                .role(com.sindikbackend.auth.entities.Role.RESIDENT)
                 .isActive(true)
                 .isAccountNonLocked(true)
                 .isAccountNonExpired(true)
@@ -58,6 +59,8 @@ public class AuthService  {
                 .refreshToken(refreshToken)
                 .username(user.getUsername())
                 .role(user.getRole().name())
+                .uuid(user.getUuid())
+                .expiresIn(jwtUtils.getExpirationMs() / (1000 * 3600))
                 .build();
     }
 
@@ -71,11 +74,9 @@ public class AuthService  {
         // ✅ expiresIn = durée en millisecondes
         long expiresInHours = jwtUtils.getExpirationMs() / (1000 * 3600);
 
-        if (!user.isEnabled()) {
-            throw new BadCredentialsException("User account is disabled");
-        }
-
-        if (!passwordEncoder.matches(req.getPassword(), user.getPassword())) {
+        if (!user.isEnabled() || !user.isAccountNonLocked()
+                || !user.isAccountNonExpired() || !user.isCredentialsNonExpired()
+                || !passwordEncoder.matches(req.getPassword(), user.getPassword())) {
             throw new BadCredentialsException("Invalid email or password");
         }
 
@@ -106,16 +107,51 @@ public class AuthService  {
                 .orElseThrow(() -> new UsernameNotFoundException("User not found with email: " + email));
     }
 
+    @Transactional(noRollbackFor = BadCredentialsException.class)
+    public AuthResponse refresh(String token) {
+        if (token == null || token.isBlank()) {
+            throw new BadCredentialsException("Invalid refresh token");
+        }
+        final User user;
+        try {
+            String email = jwtUtils.extractUsername(token);
+            user = findByEmail(email);
+            if (!jwtUtils.isValidRefreshToken(token, user)) {
+                throw new BadCredentialsException("Invalid refresh token");
+            }
+        } catch (BadCredentialsException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BadCredentialsException("Invalid refresh token");
+        }
+
+        User storedUser = refreshTokenService.consume(token);
+        if (!storedUser.getId().equals(user.getId())) {
+            throw new BadCredentialsException("Invalid refresh token");
+        }
+        if (!user.isEnabled() || !user.isAccountNonLocked()
+                || !user.isAccountNonExpired() || !user.isCredentialsNonExpired()) {
+            throw new BadCredentialsException("Invalid refresh token");
+        }
+
+        String accessToken = jwtUtils.generateToken(user);
+        String rotatedRefreshToken = jwtUtils.generateRefreshToken(user);
+        refreshTokenService.create(user, rotatedRefreshToken);
+        return AuthResponse.builder()
+                .token(accessToken)
+                .refreshToken(rotatedRefreshToken)
+                .username(user.getUsername())
+                .role(user.getRole().name())
+                .uuid(user.getUuid())
+                .expiresIn(jwtUtils.getExpirationMs() / (1000 * 3600))
+                .build();
+    }
+
     // LOGOUT SIMPLE
     public void logout(String refreshToken) {
         if (refreshToken != null && !refreshToken.isEmpty()) {
-            try {
-                refreshTokenService.delete(refreshToken);
-                log.info("Logout successful - refresh token deleted");
-            } catch (Exception e) {
-                log.error("Error deleting refresh token: {}", e.getMessage());
-                // Ne pas bloquer le logout
-            }
+            refreshTokenService.delete(refreshToken);
+            log.info("Logout successful - refresh token deleted");
         } else {
             log.info("Logout without refresh token");
         }

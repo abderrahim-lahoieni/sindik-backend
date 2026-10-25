@@ -65,7 +65,7 @@ public class UnitController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
     public ResponseEntity<UnitResponse> createUnit(@Valid @RequestBody UnitCreateRequest request) {
         log.info("REST request to create unit: {}", request.getUnitNumber());
         return ResponseEntity.status(HttpStatus.CREATED).body(unitCrudService.createUnit(request));

@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
+import org.springframework.security.authentication.BadCredentialsException;
 
 @Service
 @RequiredArgsConstructor
@@ -17,8 +18,7 @@ public class RefreshTokenService {
 
     private final RefreshTokenRepository refreshTokenRepository;
 
-    // durée refresh token : 7 jours
-    private static final long REFRESH_TOKEN_DAYS = 1;
+    private static final long REFRESH_TOKEN_DAYS = 7;
 
     public void create(User user, String token) {
 
@@ -35,6 +35,18 @@ public class RefreshTokenService {
 
     public void delete(String token) {
         refreshTokenRepository.deleteByToken(token);
+    }
+
+    public User consume(String token) {
+        RefreshToken stored = refreshTokenRepository.findByTokenForUpdate(token)
+                .orElseThrow(() -> new BadCredentialsException("Invalid refresh token"));
+        if (stored.isExpired()) {
+            refreshTokenRepository.delete(stored);
+            throw new BadCredentialsException("Invalid refresh token");
+        }
+        User user = stored.getUser();
+        refreshTokenRepository.delete(stored);
+        return user;
     }
 
 }

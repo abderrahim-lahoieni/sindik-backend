@@ -34,6 +34,11 @@ public class AuthController {
         return ResponseEntity.ok(authService.login(request));
     }
 
+    @PostMapping("/refresh")
+    public ResponseEntity<AuthResponse> refresh(@RequestBody Map<String, String> body) {
+        return ResponseEntity.ok(authService.refresh(body == null ? null : body.get("refreshToken")));
+    }
+
     @GetMapping("/me")
     public ResponseEntity<String> getCurrentUser() {
         return ResponseEntity.ok("User authenticated successfully");
