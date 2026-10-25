@@ -12,6 +12,9 @@ import com.sindikbackend.auth.repositories.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -174,6 +177,10 @@ public class UserCrudService {
     public UserResponse updateUser(UUID uuid, UserUpdateRequest request) {
         log.info("Updating user with uuid: {}", uuid);
 
+        if (hasAdministrativeFields(request) && !isCurrentUserAdmin()) {
+            throw new AccessDeniedException("Only an administrator can update administrative user fields");
+        }
+
         User user = userRepository.findByUuid(uuid)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with uuid: " + uuid));
 
@@ -216,6 +223,20 @@ public class UserCrudService {
         log.info("User updated successfully with uuid: {}", updatedUser.getUuid());
 
         return mapToResponse(updatedUser);
+    }
+
+    private boolean hasAdministrativeFields(UserUpdateRequest request) {
+        return request.getRole() != null
+                || request.getIsActive() != null
+                || request.getIsAccountNonLocked() != null
+                || request.getIsAccountNonExpired() != null
+                || request.getIsCredentialsNonExpired() != null;
+    }
+
+    private boolean isCurrentUserAdmin() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()));
     }
 
     // ========================================
