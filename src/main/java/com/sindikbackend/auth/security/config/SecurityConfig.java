@@ -1,8 +1,9 @@
 package com.sindikbackend.auth.security.config;
 
 import com.sindikbackend.auth.security.jwt.JwtFilter;
+import jakarta.servlet.DispatcherType;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -22,8 +23,6 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.Arrays;
 import java.util.List;
@@ -40,25 +39,41 @@ public class SecurityConfig {
     private final JwtFilter jwtFilter;
     private final UserDetailsService userDetailsService;
 
+    @Value("${app.cors.allowed-origins}")
+    private String allowedOrigins;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .authorizeHttpRequests(auth -> auth
-                        // Endpoints publics
-                        .requestMatchers("/auth/**").permitAll()
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers(HttpMethod.POST,
+                                "/auth/register", "/auth/login", "/auth/refresh", "/auth/logout").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/auth/me").authenticated()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/health").permitAll()
 
-                        // Endpoints protégés par rôle
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/api/finance/**").hasRole("FINANCE_MANAGER")
-                        .requestMatchers("/api/resident/**").hasRole("RESIDENT")
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        // Routes racine : les règles détaillées restent dans @PreAuthorize.
+                        .requestMatchers("/users/**", "/syndic-buildings/**").authenticated()
+                        // La gestion des unités appartient aux syndics affectés à leurs bâtiments.
+                        .requestMatchers(HttpMethod.POST, "/units/**").authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/units/**").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/units/**").authenticated()
+                        .requestMatchers(HttpMethod.PATCH, "/units/**").authenticated()
+                        .requestMatchers("/units/**").hasAnyRole("ADMIN", "SYNDIC")
+                        // L'identité utilisée par /me vient du principal authentifié ; le service
+                        // vérifie ensuite que ce compte est bien un résident.
+                        .requestMatchers(HttpMethod.GET, "/residents/me").authenticated()
+                        .requestMatchers("/residents/user/*").hasAnyRole("ADMIN", "SYNDIC", "RESIDENT")
+                        .requestMatchers("/residences/**", "/buildings/**",
+                                "/residents/**", "/contracts/**", "/payments/**")
+                        .hasAnyRole("ADMIN", "SYNDIC")
 
-                        // Tout le reste nécessite une authentification
-                        .anyRequest().authenticated()
+                        // Un nouvel endpoint doit être autorisé explicitement.
+                        .anyRequest().denyAll()
                 )
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authenticationProvider(authenticationProvider())
@@ -92,7 +107,10 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of("http://localhost:4200", "https://yourdomain.com"));
+        configuration.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toList());
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
@@ -103,18 +121,4 @@ public class SecurityConfig {
         return source;
     }
 
-    @Bean
-    public WebMvcConfigurer corsConfigurer() {
-        return new WebMvcConfigurer() {
-            @Override
-            public void addCorsMappings(CorsRegistry registry) {
-                registry.addMapping("/**")
-                        .allowedOrigins("http://localhost:4200")
-                        .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
-                        .allowedHeaders("*")
-                        .allowCredentials(true)
-                        .maxAge(3600);
-            }
-        };
-    }
 }

@@ -3,6 +3,7 @@ package com.sindikbackend.admin.resident.services;
 import com.sindikbackend.auth.dtos.requests.UserCreateRequest;
 import com.sindikbackend.auth.entities.Role;
 import com.sindikbackend.auth.entities.User;
+import com.sindikbackend.auth.exceptions.BadRequestException;
 import com.sindikbackend.auth.exceptions.ResourceNotFoundException;
 import com.sindikbackend.auth.repositories.UserRepository;
 import com.sindikbackend.admin.resident.dtos.requests.ResidentCreateRequest;
@@ -111,12 +112,35 @@ public class ResidentCrudService {
                 .collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ResidentResponse findByUserUuid(UUID userUuid) {
         log.info("Finding resident by user uuid: {}", userUuid);
-        Resident resident = residentRepository.findByUserUuid(userUuid)
-                .orElseThrow(() -> new ResourceNotFoundException("Resident not found for user uuid: " + userUuid));
+
+        User user = userRepository.findByUuid(userUuid)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + userUuid));
+        if (user.getRole() != Role.RESIDENT) {
+            throw new ResourceNotFoundException("Resident not found for user uuid: " + userUuid);
+        }
+
+        Resident resident = residentRepository.findByUserUuid(userUuid).orElse(null);
+        if (resident == null) {
+            List<Resident> matchingResidents = residentRepository.findAllByFullNameIgnoreCaseAndUserIsNull(user.getFullName()).stream()
+                    .filter(candidate -> generatedResidentEmail(candidate.getFullName()).equalsIgnoreCase(user.getEmail()))
+                    .limit(2)
+                    .toList();
+            if (matchingResidents.size() != 1) {
+                throw new ResourceNotFoundException("Resident record could not be matched to user: " + userUuid);
+            }
+
+            resident = matchingResidents.get(0);
+            resident.setUser(user);
+            resident = residentRepository.save(resident);
+        }
         return mapToResponse(resident);
+    }
+
+    private String generatedResidentEmail(String fullName) {
+        return fullName.toLowerCase().replaceAll("\\s+", "") + "@resident.com";
     }
 
     @Transactional(readOnly = true)
@@ -183,22 +207,21 @@ public class ResidentCrudService {
                     .orElseThrow(() -> new ResourceNotFoundException("User not found with uuid: " + request.getUserUuid()));
         }
 
-        String defaultPassword = "resident@" + Year.now().getValue();
-        String email = request.getFullName()
-                .toLowerCase()
-                .replaceAll("\\s+", "")   // supprime tous les espaces
-                + "@resident.com";
-        // 4️⃣ Construire UserCreateRequest
-        UserCreateRequest userRequest = UserCreateRequest.builder()
-                .fullName(request.getFullName())
-                .email(email)
-                .password(defaultPassword)
-                .role(Role.RESIDENT)
-                .isActive(true)
-                .build();
+        if (user == null) {
+            UserCreateRequest userRequest = UserCreateRequest.builder()
+                    .fullName(request.getFullName())
+                    .email(generatedResidentEmail(request.getFullName()))
+                    .password("resident@" + Year.now().getValue())
+                    .role(Role.RESIDENT)
+                    .isActive(true)
+                    .build();
 
-        // 5️⃣ Créer le user via service
-        userService.createUser(userRequest);
+            var createdUser = userService.createUser(userRequest);
+            user = userRepository.findByUuid(createdUser.getUuid())
+                    .orElseThrow(() -> new ResourceNotFoundException("Created resident user could not be loaded"));
+        } else if (user.getRole() != Role.RESIDENT) {
+            throw new BadRequestException("A resident profile can only be linked to a RESIDENT account");
+        }
 
         Resident resident = Resident.builder()
                 .fullName(request.getFullName())

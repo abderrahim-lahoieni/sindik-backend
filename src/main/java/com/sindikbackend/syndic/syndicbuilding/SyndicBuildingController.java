@@ -18,7 +18,6 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/syndic-buildings")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:4200")
 public class SyndicBuildingController {
 
     private final SyndicBuildingService syndicBuildingService;

@@ -32,6 +32,8 @@ public interface ResidentRepository extends JpaRepository<Resident, Long> {
     @Query("SELECT r FROM Resident r WHERE r.user.uuid = :userUuid")
     Optional<Resident> findByUserUuid(@Param("userUuid") UUID userUuid);
 
+    List<Resident> findAllByFullNameIgnoreCaseAndUserIsNull(String fullName);
+
     @Query("SELECT r FROM Resident r WHERE r.isOwner = true AND r.isActive = true")
     List<Resident> findOwners();
 

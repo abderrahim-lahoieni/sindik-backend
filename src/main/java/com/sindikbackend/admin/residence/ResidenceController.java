@@ -19,7 +19,6 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/residences")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:4200")
 public class ResidenceController {
 
     private final ResidenceCrudService residenceCrudService;

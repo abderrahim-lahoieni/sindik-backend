@@ -8,6 +8,7 @@ import com.sindikbackend.admin.unit.entities.Unit;
 import com.sindikbackend.admin.unit.repositories.UnitRepository;
 import com.sindikbackend.auth.exceptions.BadRequestException;
 import com.sindikbackend.auth.exceptions.ResourceNotFoundException;
+import com.sindikbackend.auth.entities.Role;
 
 import com.sindikbackend.syndic.contract.dtos.requests.ContractCreateRequest;
 import com.sindikbackend.syndic.contract.dtos.requests.ContractUpdateRequest;
@@ -16,6 +17,7 @@ import com.sindikbackend.syndic.contract.entities.Contract;
 import com.sindikbackend.syndic.contract.enums.ContractStatus;
 import com.sindikbackend.syndic.contract.enums.ContractType;
 import com.sindikbackend.syndic.contract.repositories.ContractRepository;
+import com.sindikbackend.syndic.syndicbuilding.repositories.SyndicBuildingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -35,6 +38,7 @@ public class ContractCrudService {
     private final ContractRepository contractRepository;
     private final ResidentRepository residentRepository;
     private final UnitRepository unitRepository;
+    private final SyndicBuildingRepository syndicBuildingRepository;
 
     private ContractResponse mapToResponse(Contract contract) {
         return ContractResponse.builder()
@@ -68,7 +72,7 @@ public class ContractCrudService {
     }
 
     @Transactional
-    public ContractResponse createContract(ContractCreateRequest request) {
+    public ContractResponse createContract(ContractCreateRequest request, UUID userUuid, Role role) {
         log.info("Creating new contract for resident: {} and unit: {}",
                 request.getResidentUuid(), request.getUnitUuid());
 
@@ -81,6 +85,7 @@ public class ContractCrudService {
         Unit unit = unitRepository.findByUuid(request.getUnitUuid())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Unit not found with uuid: " + request.getUnitUuid()));
+        requireBuildingAccess(userUuid, role, unit.getBuilding().getUuid());
 
         // Vérifier les dates
         if (request.getEndDate() != null && request.getEndDate().isBefore(request.getStartDate())) {
@@ -121,6 +126,11 @@ public class ContractCrudService {
     }
 
     @Transactional(readOnly = true)
+    public List<ContractResponse> findAllContracts(UUID userUuid, Role role) {
+        return restrictToManagedBuildings(findAllContracts(), userUuid, role);
+    }
+
+    @Transactional(readOnly = true)
     public ContractResponse findByUuid(UUID uuid) {
         log.info("Finding contract by uuid: {}", uuid);
         Contract contract = contractRepository.findByUuid(uuid)
@@ -128,12 +138,20 @@ public class ContractCrudService {
         return mapToResponse(contract);
     }
 
+    @Transactional(readOnly = true)
+    public ContractResponse findByUuid(UUID uuid, UUID userUuid, Role role) {
+        ContractResponse contract = findByUuid(uuid);
+        requireBuildingAccess(userUuid, role, contract.getBuildingUuid());
+        return contract;
+    }
+
     @Transactional
-    public ContractResponse updateContract(UUID uuid, ContractUpdateRequest request) {
+    public ContractResponse updateContract(UUID uuid, ContractUpdateRequest request, UUID userUuid, Role role) {
         log.info("Updating contract: {}", uuid);
 
         Contract contract = contractRepository.findByUuid(uuid)
                 .orElseThrow(() -> new ResourceNotFoundException("Contract not found with uuid: " + uuid));
+        requireBuildingAccess(userUuid, role, contract.getUnit().getBuilding().getUuid());
 
         if (request.getResidentUuid() != null) {
             Resident resident = residentRepository.findByUuid(request.getResidentUuid())
@@ -146,6 +164,7 @@ public class ContractCrudService {
             Unit unit = unitRepository.findByUuid(request.getUnitUuid())
                     .orElseThrow(() -> new ResourceNotFoundException(
                             "Unit not found with uuid: " + request.getUnitUuid()));
+            requireBuildingAccess(userUuid, role, unit.getBuilding().getUuid());
             contract.setUnit(unit);
         }
 
@@ -171,10 +190,11 @@ public class ContractCrudService {
     }
 
     @Transactional
-    public void deleteContract(UUID uuid) {
+    public void deleteContract(UUID uuid, UUID userUuid, Role role) {
         log.info("Deleting contract: {}", uuid);
         Contract contract = contractRepository.findByUuid(uuid)
                 .orElseThrow(() -> new ResourceNotFoundException("Contract not found with uuid: " + uuid));
+        requireBuildingAccess(userUuid, role, contract.getUnit().getBuilding().getUuid());
         contractRepository.delete(contract);
         log.info("Contract deleted successfully: {}", uuid);
     }
@@ -190,11 +210,22 @@ public class ContractCrudService {
     }
 
     @Transactional(readOnly = true)
+    public List<ContractResponse> findByBuildingUuid(UUID buildingUuid, UUID userUuid, Role role) {
+        if (role == Role.SYNDIC && !hasBuildingAccess(userUuid, buildingUuid)) return List.of();
+        return restrictToManagedBuildings(findByBuildingUuid(buildingUuid), userUuid, role);
+    }
+
+    @Transactional(readOnly = true)
     public List<ContractResponse> findByResidentUuid(UUID residentUuid) {
         log.info("Finding contracts by resident: {}", residentUuid);
         return contractRepository.findByResidentUuid(residentUuid).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ContractResponse> findByResidentUuid(UUID residentUuid, UUID userUuid, Role role) {
+        return restrictToManagedBuildings(findByResidentUuid(residentUuid), userUuid, role);
     }
 
     @Transactional(readOnly = true)
@@ -208,11 +239,49 @@ public class ContractCrudService {
     }
 
     @Transactional(readOnly = true)
+    public List<ContractResponse> findExpiringContracts(int daysAhead, UUID userUuid, Role role) {
+        return restrictToManagedBuildings(findExpiringContracts(daysAhead), userUuid, role);
+    }
+
+    @Transactional(readOnly = true)
     public List<ContractResponse> findByFilters(UUID residentUuid, UUID unitUuid, UUID buildingUuid,
                                                 ContractType type, ContractStatus status, Boolean isActive) {
         log.info("Finding contracts with filters");
         return contractRepository.findByFilters(residentUuid, unitUuid, buildingUuid, type, status, isActive).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ContractResponse> findByFilters(UUID residentUuid, UUID unitUuid, UUID buildingUuid,
+                                                ContractType type, ContractStatus status, Boolean isActive,
+                                                UUID userUuid, Role role) {
+        return restrictToManagedBuildings(
+                findByFilters(residentUuid, unitUuid, buildingUuid, type, status, isActive), userUuid, role);
+    }
+
+    private List<ContractResponse> restrictToManagedBuildings(List<ContractResponse> contracts,
+                                                                UUID userUuid, Role role) {
+        if (role == Role.ADMIN) return contracts;
+        if (role != Role.SYNDIC) {
+            throw new org.springframework.security.access.AccessDeniedException("Only admins and syndics can view contracts");
+        }
+        Set<UUID> managedBuildings = syndicBuildingRepository.findBySyndicUuid(userUuid).stream()
+                .map(assignment -> assignment.getBuilding().getUuid())
+                .collect(Collectors.toSet());
+        return contracts.stream()
+                .filter(contract -> managedBuildings.contains(contract.getBuildingUuid()))
+                .collect(Collectors.toList());
+    }
+
+    private void requireBuildingAccess(UUID userUuid, Role role, UUID buildingUuid) {
+        if (role == Role.ADMIN) return;
+        if (role != Role.SYNDIC || !hasBuildingAccess(userUuid, buildingUuid)) {
+            throw new org.springframework.security.access.AccessDeniedException("Contract is outside the syndic's assigned buildings");
+        }
+    }
+
+    private boolean hasBuildingAccess(UUID userUuid, UUID buildingUuid) {
+        return syndicBuildingRepository.existsBySyndicAndBuilding(userUuid, buildingUuid);
     }
 }

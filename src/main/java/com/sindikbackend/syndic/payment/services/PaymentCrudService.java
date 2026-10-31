@@ -5,6 +5,7 @@ import com.sindikbackend.admin.resident.entities.Resident;
 import com.sindikbackend.admin.resident.repositories.ResidentRepository;
 import com.sindikbackend.auth.exceptions.BadRequestException;
 import com.sindikbackend.auth.exceptions.ResourceNotFoundException;
+import com.sindikbackend.auth.entities.Role;
 
 import com.sindikbackend.syndic.contract.entities.Contract;
 import com.sindikbackend.syndic.payment.dtos.requests.PaymentCreateRequest;
@@ -15,6 +16,7 @@ import com.sindikbackend.syndic.contract.repositories.ContractRepository;
 import com.sindikbackend.syndic.payment.enums.PaymentStatus;
 import com.sindikbackend.syndic.payment.enums.PaymentType;
 import com.sindikbackend.syndic.payment.repositories.PaymentRepository;
+import com.sindikbackend.syndic.syndicbuilding.repositories.SyndicBuildingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -35,6 +38,7 @@ public class PaymentCrudService {
     private final PaymentRepository paymentRepository;
     private final ContractRepository contractRepository;
     private final ResidentRepository residentRepository;
+    private final SyndicBuildingRepository syndicBuildingRepository;
 
     private PaymentResponse mapToResponse(Payment payment) {
         return PaymentResponse.builder()
@@ -70,13 +74,14 @@ public class PaymentCrudService {
     }
 
     @Transactional
-    public PaymentResponse createPayment(PaymentCreateRequest request) {
+    public PaymentResponse createPayment(PaymentCreateRequest request, UUID userUuid, Role role) {
         log.info("Creating new payment for contract: {}", request.getContractUuid());
 
         // Vérifier que le contrat existe
         Contract contract = contractRepository.findByUuid(request.getContractUuid())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Contract not found with uuid: " + request.getContractUuid()));
+        requireBuildingAccess(userUuid, role, contract.getUnit().getBuilding().getUuid());
 
         // Vérifier que le résident existe
         Resident resident = residentRepository.findByUuid(request.getResidentUuid())
@@ -125,6 +130,11 @@ public class PaymentCrudService {
     }
 
     @Transactional(readOnly = true)
+    public List<PaymentResponse> findAllPayments(UUID userUuid, Role role) {
+        return restrictToManagedBuildings(findAllPayments(), userUuid, role);
+    }
+
+    @Transactional(readOnly = true)
     public PaymentResponse findByUuid(UUID uuid) {
         log.info("Finding payment by uuid: {}", uuid);
         Payment payment = paymentRepository.findByUuid(uuid)
@@ -132,12 +142,20 @@ public class PaymentCrudService {
         return mapToResponse(payment);
     }
 
+    @Transactional(readOnly = true)
+    public PaymentResponse findByUuid(UUID uuid, UUID userUuid, Role role) {
+        PaymentResponse payment = findByUuid(uuid);
+        requireBuildingAccess(userUuid, role, payment.getBuildingUuid());
+        return payment;
+    }
+
     @Transactional
-    public PaymentResponse updatePayment(UUID uuid, PaymentUpdateRequest request) {
+    public PaymentResponse updatePayment(UUID uuid, PaymentUpdateRequest request, UUID userUuid, Role role) {
         log.info("Updating payment: {}", uuid);
 
         Payment payment = paymentRepository.findByUuid(uuid)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found with uuid: " + uuid));
+        requireBuildingAccess(userUuid, role, payment.getContract().getUnit().getBuilding().getUuid());
 
         if (request.getType() != null) payment.setType(request.getType());
         if (request.getStatus() != null) payment.setStatus(request.getStatus());
@@ -164,10 +182,11 @@ public class PaymentCrudService {
     }
 
     @Transactional
-    public void deletePayment(UUID uuid) {
+    public void deletePayment(UUID uuid, UUID userUuid, Role role) {
         log.info("Deleting payment: {}", uuid);
         Payment payment = paymentRepository.findByUuid(uuid)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found with uuid: " + uuid));
+        requireBuildingAccess(userUuid, role, payment.getContract().getUnit().getBuilding().getUuid());
         paymentRepository.delete(payment);
         log.info("Payment deleted successfully: {}", uuid);
     }
@@ -183,11 +202,21 @@ public class PaymentCrudService {
     }
 
     @Transactional(readOnly = true)
+    public List<PaymentResponse> findByContractUuid(UUID contractUuid, UUID userUuid, Role role) {
+        return restrictToManagedBuildings(findByContractUuid(contractUuid), userUuid, role);
+    }
+
+    @Transactional(readOnly = true)
     public List<PaymentResponse> findByResidentUuid(UUID residentUuid) {
         log.info("Finding payments by resident: {}", residentUuid);
         return paymentRepository.findByResidentUuid(residentUuid).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<PaymentResponse> findByResidentUuid(UUID residentUuid, UUID userUuid, Role role) {
+        return restrictToManagedBuildings(findByResidentUuid(residentUuid), userUuid, role);
     }
 
     @Transactional(readOnly = true)
@@ -199,11 +228,22 @@ public class PaymentCrudService {
     }
 
     @Transactional(readOnly = true)
+    public List<PaymentResponse> findByBuildingUuid(UUID buildingUuid, UUID userUuid, Role role) {
+        if (role == Role.SYNDIC && !hasBuildingAccess(userUuid, buildingUuid)) return List.of();
+        return restrictToManagedBuildings(findByBuildingUuid(buildingUuid), userUuid, role);
+    }
+
+    @Transactional(readOnly = true)
     public List<PaymentResponse> findOverduePayments() {
         log.info("Finding overdue payments");
         return paymentRepository.findOverdue(LocalDate.now()).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<PaymentResponse> findOverduePayments(UUID userUuid, Role role) {
+        return restrictToManagedBuildings(findOverduePayments(), userUuid, role);
     }
 
     @Transactional(readOnly = true)
@@ -217,6 +257,11 @@ public class PaymentCrudService {
     }
 
     @Transactional(readOnly = true)
+    public List<PaymentResponse> findUpcomingPayments(int daysAhead, UUID userUuid, Role role) {
+        return restrictToManagedBuildings(findUpcomingPayments(daysAhead), userUuid, role);
+    }
+
+    @Transactional(readOnly = true)
     public List<PaymentResponse> findByFilters(UUID contractUuid, UUID residentUuid, UUID buildingUuid,
                                                PaymentType type, PaymentStatus status,
                                                LocalDate startDate, LocalDate endDate) {
@@ -227,12 +272,24 @@ public class PaymentCrudService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<PaymentResponse> findByFilters(UUID contractUuid, UUID residentUuid, UUID buildingUuid,
+                                               PaymentType type, PaymentStatus status,
+                                               LocalDate startDate, LocalDate endDate,
+                                               UUID userUuid, Role role) {
+        return restrictToManagedBuildings(
+                findByFilters(contractUuid, residentUuid, buildingUuid, type, status, startDate, endDate),
+                userUuid, role);
+    }
+
     @Transactional
-    public PaymentResponse recordPayment(UUID uuid, BigDecimal amount, PaymentUpdateRequest request) {
+    public PaymentResponse recordPayment(UUID uuid, BigDecimal amount, PaymentUpdateRequest request,
+                                         UUID userUuid, Role role) {
         log.info("Recording payment for: {}", uuid);
 
         Payment payment = paymentRepository.findByUuid(uuid)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found with uuid: " + uuid));
+        requireBuildingAccess(userUuid, role, payment.getContract().getUnit().getBuilding().getUuid());
 
         BigDecimal newAmountPaid = payment.getAmountPaid().add(amount);
 
@@ -298,14 +355,51 @@ public class PaymentCrudService {
     }
 
     @Transactional(readOnly = true)
+    public BigDecimal getTotalPaidByBuilding(UUID buildingUuid, UUID userUuid, Role role) {
+        requireBuildingAccess(userUuid, role, buildingUuid);
+        return getTotalPaidByBuilding(buildingUuid);
+    }
+
+    @Transactional(readOnly = true)
     public BigDecimal getTotalPendingByBuilding(UUID buildingUuid) {
         BigDecimal total = paymentRepository.sumPendingByBuildingUuid(buildingUuid);
         return total != null ? total : BigDecimal.ZERO;
     }
 
     @Transactional(readOnly = true)
+    public BigDecimal getTotalPendingByBuilding(UUID buildingUuid, UUID userUuid, Role role) {
+        requireBuildingAccess(userUuid, role, buildingUuid);
+        return getTotalPendingByBuilding(buildingUuid);
+    }
+
+    @Transactional(readOnly = true)
     public BigDecimal getTotalPaidInPeriod(LocalDate startDate, LocalDate endDate) {
         BigDecimal total = paymentRepository.sumPaidInPeriod(startDate, endDate);
         return total != null ? total : BigDecimal.ZERO;
+    }
+
+    private List<PaymentResponse> restrictToManagedBuildings(List<PaymentResponse> payments,
+                                                              UUID userUuid, Role role) {
+        if (role == Role.ADMIN) return payments;
+        if (role != Role.SYNDIC) {
+            throw new org.springframework.security.access.AccessDeniedException("Only admins and syndics can view payments");
+        }
+        Set<UUID> managedBuildings = syndicBuildingRepository.findBySyndicUuid(userUuid).stream()
+                .map(assignment -> assignment.getBuilding().getUuid())
+                .collect(Collectors.toSet());
+        return payments.stream()
+                .filter(payment -> managedBuildings.contains(payment.getBuildingUuid()))
+                .collect(Collectors.toList());
+    }
+
+    private void requireBuildingAccess(UUID userUuid, Role role, UUID buildingUuid) {
+        if (role == Role.ADMIN) return;
+        if (role != Role.SYNDIC || !hasBuildingAccess(userUuid, buildingUuid)) {
+            throw new org.springframework.security.access.AccessDeniedException("Payment is outside the syndic's assigned buildings");
+        }
+    }
+
+    private boolean hasBuildingAccess(UUID userUuid, UUID buildingUuid) {
+        return syndicBuildingRepository.existsBySyndicAndBuilding(userUuid, buildingUuid);
     }
 }

@@ -6,6 +6,7 @@ import com.sindikbackend.syndic.payment.dtos.responses.PaymentResponse;
 import com.sindikbackend.syndic.payment.enums.PaymentStatus;
 import com.sindikbackend.syndic.payment.enums.PaymentType;
 import com.sindikbackend.syndic.payment.services.PaymentCrudService;
+import com.sindikbackend.auth.entities.User;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +14,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -24,16 +26,17 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/payments")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:4200")
 public class PaymentController {
 
     private final PaymentCrudService paymentCrudService;
 
     @PostMapping
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<PaymentResponse> createPayment(@Valid @RequestBody PaymentCreateRequest request) {
+    public ResponseEntity<PaymentResponse> createPayment(@Valid @RequestBody PaymentCreateRequest request,
+                                                          @AuthenticationPrincipal User currentUser) {
         log.info("REST request to create payment");
-        return ResponseEntity.status(HttpStatus.CREATED).body(paymentCrudService.createPayment(request));
+        return ResponseEntity.status(HttpStatus.CREATED).body(paymentCrudService.createPayment(
+                request, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @GetMapping
@@ -45,40 +48,46 @@ public class PaymentController {
             @RequestParam(required = false) PaymentType type,
             @RequestParam(required = false) PaymentStatus status,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @AuthenticationPrincipal User currentUser) {
 
         log.info("REST request to get payments with filters");
 
         if (contractUuid != null || residentUuid != null || buildingUuid != null ||
                 type != null || status != null || startDate != null || endDate != null) {
             return ResponseEntity.ok(paymentCrudService.findByFilters(
-                    contractUuid, residentUuid, buildingUuid, type, status, startDate, endDate));
+                    contractUuid, residentUuid, buildingUuid, type, status, startDate, endDate,
+                    currentUser.getUuid(), currentUser.getRole()));
         }
 
-        return ResponseEntity.ok(paymentCrudService.findAllPayments());
+        return ResponseEntity.ok(paymentCrudService.findAllPayments(currentUser.getUuid(), currentUser.getRole()));
     }
 
     @GetMapping("/{uuid}")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<PaymentResponse> getPaymentByUuid(@PathVariable UUID uuid) {
+    public ResponseEntity<PaymentResponse> getPaymentByUuid(@PathVariable UUID uuid,
+                                                             @AuthenticationPrincipal User currentUser) {
         log.info("REST request to get payment by uuid: {}", uuid);
-        return ResponseEntity.ok(paymentCrudService.findByUuid(uuid));
+        return ResponseEntity.ok(paymentCrudService.findByUuid(uuid, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @PutMapping("/{uuid}")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
     public ResponseEntity<PaymentResponse> updatePayment(
             @PathVariable UUID uuid,
-            @Valid @RequestBody PaymentUpdateRequest request) {
+            @Valid @RequestBody PaymentUpdateRequest request,
+            @AuthenticationPrincipal User currentUser) {
         log.info("REST request to update payment: {}", uuid);
-        return ResponseEntity.ok(paymentCrudService.updatePayment(uuid, request));
+        return ResponseEntity.ok(paymentCrudService.updatePayment(
+                uuid, request, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @DeleteMapping("/{uuid}")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<Void> deletePayment(@PathVariable UUID uuid) {
+    public ResponseEntity<Void> deletePayment(@PathVariable UUID uuid,
+                                               @AuthenticationPrincipal User currentUser) {
         log.info("REST request to delete payment: {}", uuid);
-        paymentCrudService.deletePayment(uuid);
+        paymentCrudService.deletePayment(uuid, currentUser.getUuid(), currentUser.getRole());
         return ResponseEntity.noContent().build();
     }
 
@@ -87,58 +96,72 @@ public class PaymentController {
     public ResponseEntity<PaymentResponse> recordPayment(
             @PathVariable UUID uuid,
             @RequestParam BigDecimal amount,
-            @Valid @RequestBody PaymentUpdateRequest request) {
+            @Valid @RequestBody PaymentUpdateRequest request,
+            @AuthenticationPrincipal User currentUser) {
         log.info("REST request to record payment: {}", uuid);
-        return ResponseEntity.ok(paymentCrudService.recordPayment(uuid, amount, request));
+        return ResponseEntity.ok(paymentCrudService.recordPayment(
+                uuid, amount, request, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @GetMapping("/contract/{contractUuid}")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<List<PaymentResponse>> getPaymentsByContract(@PathVariable UUID contractUuid) {
+    public ResponseEntity<List<PaymentResponse>> getPaymentsByContract(@PathVariable UUID contractUuid,
+                                                                        @AuthenticationPrincipal User currentUser) {
         log.info("REST request to get payments by contract: {}", contractUuid);
-        return ResponseEntity.ok(paymentCrudService.findByContractUuid(contractUuid));
+        return ResponseEntity.ok(paymentCrudService.findByContractUuid(
+                contractUuid, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @GetMapping("/resident/{residentUuid}")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<List<PaymentResponse>> getPaymentsByResident(@PathVariable UUID residentUuid) {
+    public ResponseEntity<List<PaymentResponse>> getPaymentsByResident(@PathVariable UUID residentUuid,
+                                                                        @AuthenticationPrincipal User currentUser) {
         log.info("REST request to get payments by resident: {}", residentUuid);
-        return ResponseEntity.ok(paymentCrudService.findByResidentUuid(residentUuid));
+        return ResponseEntity.ok(paymentCrudService.findByResidentUuid(
+                residentUuid, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @GetMapping("/building/{buildingUuid}")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<List<PaymentResponse>> getPaymentsByBuilding(@PathVariable UUID buildingUuid) {
+    public ResponseEntity<List<PaymentResponse>> getPaymentsByBuilding(@PathVariable UUID buildingUuid,
+                                                                        @AuthenticationPrincipal User currentUser) {
         log.info("REST request to get payments by building: {}", buildingUuid);
-        return ResponseEntity.ok(paymentCrudService.findByBuildingUuid(buildingUuid));
+        return ResponseEntity.ok(paymentCrudService.findByBuildingUuid(
+                buildingUuid, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @GetMapping("/overdue")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<List<PaymentResponse>> getOverduePayments() {
+    public ResponseEntity<List<PaymentResponse>> getOverduePayments(@AuthenticationPrincipal User currentUser) {
         log.info("REST request to get overdue payments");
-        return ResponseEntity.ok(paymentCrudService.findOverduePayments());
+        return ResponseEntity.ok(paymentCrudService.findOverduePayments(currentUser.getUuid(), currentUser.getRole()));
     }
 
     @GetMapping("/upcoming")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
     public ResponseEntity<List<PaymentResponse>> getUpcomingPayments(
-            @RequestParam(defaultValue = "30") int daysAhead) {
+            @RequestParam(defaultValue = "30") int daysAhead,
+            @AuthenticationPrincipal User currentUser) {
         log.info("REST request to get upcoming payments in {} days", daysAhead);
-        return ResponseEntity.ok(paymentCrudService.findUpcomingPayments(daysAhead));
+        return ResponseEntity.ok(paymentCrudService.findUpcomingPayments(
+                daysAhead, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @GetMapping("/building/{buildingUuid}/total-paid")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<BigDecimal> getTotalPaidByBuilding(@PathVariable UUID buildingUuid) {
+    public ResponseEntity<BigDecimal> getTotalPaidByBuilding(@PathVariable UUID buildingUuid,
+                                                              @AuthenticationPrincipal User currentUser) {
         log.info("REST request to get total paid for building: {}", buildingUuid);
-        return ResponseEntity.ok(paymentCrudService.getTotalPaidByBuilding(buildingUuid));
+        return ResponseEntity.ok(paymentCrudService.getTotalPaidByBuilding(
+                buildingUuid, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @GetMapping("/building/{buildingUuid}/total-pending")
     @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<BigDecimal> getTotalPendingByBuilding(@PathVariable UUID buildingUuid) {
+    public ResponseEntity<BigDecimal> getTotalPendingByBuilding(@PathVariable UUID buildingUuid,
+                                                                 @AuthenticationPrincipal User currentUser) {
         log.info("REST request to get total pending for building: {}", buildingUuid);
-        return ResponseEntity.ok(paymentCrudService.getTotalPendingByBuilding(buildingUuid));
+        return ResponseEntity.ok(paymentCrudService.getTotalPendingByBuilding(
+                buildingUuid, currentUser.getUuid(), currentUser.getRole()));
     }
 }

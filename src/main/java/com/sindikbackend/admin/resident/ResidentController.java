@@ -25,7 +25,6 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/residents")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:4200")
 public class ResidentController {
 
     private final ResidentCrudService residentCrudService;
@@ -86,6 +85,12 @@ public class ResidentController {
     public ResponseEntity<ResidentResponse> getResidentByUser(@PathVariable UUID userUuid) {
         log.info("REST request to get resident by user: {}", userUuid);
         return ResponseEntity.ok(residentCrudService.findByUserUuid(userUuid));
+    }
+
+    @GetMapping("/me")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ResidentResponse> getCurrentResident(@AuthenticationPrincipal User currentUser) {
+        return ResponseEntity.ok(residentCrudService.findByUserUuid(currentUser.getUuid()));
     }
 
     // AJOUTER une sécurité pour la création

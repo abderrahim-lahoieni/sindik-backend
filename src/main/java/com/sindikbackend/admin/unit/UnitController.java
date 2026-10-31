@@ -22,7 +22,6 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/units")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:4200")
 public class UnitController {
 
     private final UnitCrudService unitCrudService;
@@ -65,42 +64,48 @@ public class UnitController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<UnitResponse> createUnit(@Valid @RequestBody UnitCreateRequest request) {
+    public ResponseEntity<UnitResponse> createUnit(@Valid @RequestBody UnitCreateRequest request,
+                                                   @AuthenticationPrincipal UserDetails userDetails) {
         log.info("REST request to create unit: {}", request.getUnitNumber());
-        return ResponseEntity.status(HttpStatus.CREATED).body(unitCrudService.createUnit(request));
+        User currentUser = (User) userDetails;
+        return ResponseEntity.status(HttpStatus.CREATED).body(unitCrudService.createUnit(
+                request, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @PutMapping("/{uuid}")
-    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<UnitResponse> updateUnit(
             @PathVariable UUID uuid,
-            @Valid @RequestBody UnitUpdateRequest request
+            @Valid @RequestBody UnitUpdateRequest request,
+            @AuthenticationPrincipal UserDetails userDetails
     ) {
         log.info("REST request to update unit: {}", uuid);
-        return ResponseEntity.ok(unitCrudService.updateUnit(uuid, request));
+        User currentUser = (User) userDetails;
+        return ResponseEntity.ok(unitCrudService.updateUnit(
+                uuid, request, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @DeleteMapping("/{uuid}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Void> deleteUnit(@PathVariable UUID uuid) {
+    public ResponseEntity<Void> deleteUnit(@PathVariable UUID uuid, @AuthenticationPrincipal UserDetails userDetails) {
         log.info("REST request to delete unit: {}", uuid);
-        unitCrudService.deleteUnit(uuid);
+        User currentUser = (User) userDetails;
+        unitCrudService.deleteUnit(uuid, currentUser.getUuid(), currentUser.getRole());
         return ResponseEntity.noContent().build();
     }
 
     @PatchMapping("/{uuid}/toggle-status")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<UnitResponse> toggleUnitStatus(@PathVariable UUID uuid) {
+    public ResponseEntity<UnitResponse> toggleUnitStatus(@PathVariable UUID uuid,
+                                                          @AuthenticationPrincipal UserDetails userDetails) {
         log.info("REST request to toggle status for unit: {}", uuid);
-        return ResponseEntity.ok(unitCrudService.toggleUnitStatus(uuid));
+        User currentUser = (User) userDetails;
+        return ResponseEntity.ok(unitCrudService.toggleUnitStatus(uuid, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @PatchMapping("/{uuid}/toggle-occupancy")
-    @PreAuthorize("hasRole('ADMIN') or hasRole('SYNDIC')")
-    public ResponseEntity<UnitResponse> toggleUnitOccupancy(@PathVariable UUID uuid) {
+    public ResponseEntity<UnitResponse> toggleUnitOccupancy(@PathVariable UUID uuid,
+                                                             @AuthenticationPrincipal UserDetails userDetails) {
         log.info("REST request to toggle occupancy for unit: {}", uuid);
-        return ResponseEntity.ok(unitCrudService.toggleUnitOccupancy(uuid));
+        User currentUser = (User) userDetails;
+        return ResponseEntity.ok(unitCrudService.toggleUnitOccupancy(uuid, currentUser.getUuid(), currentUser.getRole()));
     }
 
     @GetMapping("/search")

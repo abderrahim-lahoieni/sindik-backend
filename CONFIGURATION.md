@@ -7,6 +7,8 @@ L'application utilise les variables d'environnement suivantes :
   Base64 doit décoder vers au moins 64 octets.
 - `DB_URL` : URL PostgreSQL, facultative en local; valeur par défaut :
   `jdbc:postgresql://localhost:5432/sindik`.
+- `CORS_ALLOWED_ORIGINS` : liste séparée par des virgules des origines frontend
+  autorisées. La valeur locale par défaut est `http://localhost:4200`.
 
 Aucune valeur par défaut n'est fournie pour les identifiants ou la clé JWT. Spring
 échoue au démarrage si l'une de ces variables manque; `JWT_SECRET` doit aussi
@@ -33,3 +35,11 @@ respecter la longueur minimale HS512.
 
 Pour un déploiement, fournir ces variables via le gestionnaire de secrets de
 l'environnement. Ne pas réutiliser les identifiants ou la clé locale.
+
+Le build Angular de production utilise une URL API relative. Le serveur web doit
+servir le frontend et transférer les routes backend (`/auth`, `/users`,
+`/residences`, `/buildings`, `/units`, `/residents`, `/contracts`, `/payments` et
+`/syndic-buildings`) vers l'API, sur la même origine. Si le frontend et l'API sont
+hébergés sur des domaines séparés, adapter `baseUrl` dans
+`src/environements/environement.production.ts` et définir `CORS_ALLOWED_ORIGINS`
+avec l'origine exacte du frontend.

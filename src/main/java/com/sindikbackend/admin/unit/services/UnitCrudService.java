@@ -205,8 +205,10 @@ public class UnitCrudService {
                 .collect(Collectors.toList());
     }
 
-    public UnitResponse createUnit(UnitCreateRequest request) {
+    public UnitResponse createUnit(UnitCreateRequest request, UUID syndicUuid, Role syndicRole) {
         log.info("Creating new unit: {} for building: {}", request.getUnitNumber(), request.getBuildingUuid());
+
+        requireSyndicBuildingAccess(syndicUuid, syndicRole, request.getBuildingUuid());
 
         Building building = buildingRepository.findByUuid(request.getBuildingUuid())
                 .orElseThrow(() -> new ResourceNotFoundException("Building not found with uuid: " + request.getBuildingUuid()));
@@ -223,7 +225,7 @@ public class UnitCrudService {
                 .description(request.getDescription())
                 .isOccupied(request.getIsOccupied() != null ? request.getIsOccupied() : false)
                 .building(building)
-                .isActive(request.getIsActive() != null ? request.getIsActive() : true)
+                .isActive(true)
                 .build();
 
         Unit savedUnit = unitRepository.save(unit);
@@ -232,11 +234,13 @@ public class UnitCrudService {
         return mapToResponse(savedUnit);
     }
 
-    public UnitResponse updateUnit(UUID uuid, UnitUpdateRequest request) {
+    public UnitResponse updateUnit(UUID uuid, UnitUpdateRequest request, UUID syndicUuid, Role syndicRole) {
         log.info("Updating unit with uuid: {}", uuid);
 
         Unit unit = unitRepository.findByUuid(uuid)
                 .orElseThrow(() -> new ResourceNotFoundException("Unit not found with uuid: " + uuid));
+
+        requireSyndicBuildingAccess(syndicUuid, syndicRole, unit.getBuilding().getUuid());
 
         unit.setUnitNumber(request.getUnitNumber());
 
@@ -245,6 +249,8 @@ public class UnitCrudService {
 
             Building newBuilding = buildingRepository.findByUuid(request.getBuildingUuid())
                     .orElseThrow(() -> new ResourceNotFoundException("Building not found with uuid: " + request.getBuildingUuid()));
+
+            requireSyndicBuildingAccess(syndicUuid, syndicRole, newBuilding.getUuid());
 
             unit.setBuilding(newBuilding);
         }
@@ -275,10 +281,6 @@ public class UnitCrudService {
             unit.setIsOccupied(request.getIsOccupied());
         }
 
-        if (request.getIsActive() != null) {
-            unit.setIsActive(request.getIsActive());
-        }
-
         Unit updatedUnit = unitRepository.save(unit);
         log.info("Unit updated successfully with uuid: {}", updatedUnit.getUuid());
 
@@ -286,21 +288,25 @@ public class UnitCrudService {
     }
 
     @Transactional
-    public void deleteUnit(UUID uuid) {
+    public void deleteUnit(UUID uuid, UUID syndicUuid, Role syndicRole) {
         log.info("Deleting unit with uuid: {}", uuid);
 
         Unit unit = unitRepository.findByUuid(uuid)
                 .orElseThrow(() -> new ResourceNotFoundException("Unit not found with uuid: " + uuid));
 
+        requireSyndicBuildingAccess(syndicUuid, syndicRole, unit.getBuilding().getUuid());
+
         unitRepository.delete(unit);
         log.info("Unit deleted successfully: {}", uuid);
     }
 
-    public UnitResponse toggleUnitStatus(UUID uuid) {
+    public UnitResponse toggleUnitStatus(UUID uuid, UUID syndicUuid, Role syndicRole) {
         log.info("Toggling status for unit: {}", uuid);
 
         Unit unit = unitRepository.findByUuid(uuid)
                 .orElseThrow(() -> new ResourceNotFoundException("Unit not found with uuid: " + uuid));
+
+        requireSyndicBuildingAccess(syndicUuid, syndicRole, unit.getBuilding().getUuid());
 
         unit.setIsActive(!unit.getIsActive());
         Unit updatedUnit = unitRepository.save(unit);
@@ -310,11 +316,13 @@ public class UnitCrudService {
         return mapToResponse(updatedUnit);
     }
 
-    public UnitResponse toggleUnitOccupancy(UUID uuid) {
+    public UnitResponse toggleUnitOccupancy(UUID uuid, UUID syndicUuid, Role syndicRole) {
         log.info("Toggling occupancy for unit: {}", uuid);
 
         Unit unit = unitRepository.findByUuid(uuid)
                 .orElseThrow(() -> new ResourceNotFoundException("Unit not found with uuid: " + uuid));
+
+        requireSyndicBuildingAccess(syndicUuid, syndicRole, unit.getBuilding().getUuid());
 
         unit.setIsOccupied(!unit.getIsOccupied());
         Unit updatedUnit = unitRepository.save(unit);
@@ -322,6 +330,17 @@ public class UnitCrudService {
         log.info("Unit occupancy toggled to: {} for uuid: {}", unit.getIsOccupied(), uuid);
 
         return mapToResponse(updatedUnit);
+    }
+
+    private void requireSyndicBuildingAccess(UUID syndicUuid, Role syndicRole, UUID buildingUuid) {
+        if (syndicRole != Role.SYNDIC) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Only a syndic can manage units");
+        }
+        if (!syndicBuildingRepository.existsBySyndicAndBuilding(syndicUuid, buildingUuid)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "You are not assigned to manage this building");
+        }
     }
 
     @Transactional(readOnly = true)
